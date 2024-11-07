@@ -21,23 +21,24 @@
 void app_main() {
 
     char *ourTaskName = pcTaskGetName(NULL);
-
-    ESP_LOGI(ourTaskName, "Starting up!\n");
-
     
+    ESP_LOGI(ourTaskName, "Starting up!\n");
 
     //Initialize SD card
     ESP_LOGI(ourTaskName, "Initializing SD card");
 
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = false,
+        .disk_status_check_enable = true,
         .max_files = 2
     };
 
     sdmmc_card_t *card;
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 400;
+    //Speed set at about .7 max speed that did not through a 109 improper error.
+    host.max_freq_khz = 6000;
+    
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = PIN_NUM_MOSI,
@@ -48,9 +49,9 @@ void app_main() {
     };
 
     esp_err_t ret;
-    ret = spi_bus_initialize(host.slot, &bus_cfg, SPI2_HOST);
+    ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
     if (ret != ESP_OK) {
-        ESP_LOGE(ourTaskName, "Failed to intialize bus");
+        ESP_LOGE(ourTaskName, "Failed to initialize bus");
         return;
     }
 
