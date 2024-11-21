@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "sdspi_host.h": "c",
+        "esp_log.h": "c",
+        "i2s_std.h": "c"
+    }
+}

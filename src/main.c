@@ -25,19 +25,18 @@
 #define MAX_FILE_NAME_LENGTH 13
 
 // I2S driver and output
-#define I2S_CLK_PIN 22 
-#define I2S_DOUT 1 //Labeled "TX" on  ESP32 board
-#define I2S_WS 3 //Labeled "RX" on  ESP32 board
+#define I2S_CLK_PIN 17
+#define I2S_DOUT 16
+#define I2S_WS 4 
 
 #define WB_SIZE 2048
-
-
 
 void app_main() {
 
     char *ourTaskName = pcTaskGetName(NULL);
     
     ESP_LOGI(ourTaskName, "Starting up!\n");
+    ESP_LOGI(ourTaskName, "Task name pointer: %p", ourTaskName);
 
     /*
         SD card section:
@@ -153,7 +152,7 @@ void app_main() {
     }
     
     // Sort files by alphanumeric values, IE 0 - 9a - z, ignoring case, for later retrieval
-    qsort(f_names, file, sizeof(f_names[0]), strcasecmp);
+    // qsort(f_names, file, sizeof(f_names[0]), strcasecmp);
 
     ESP_LOGI(ourTaskName, "File Order: \n");
     for (int i = 0; i <file; ++i) {
@@ -164,11 +163,12 @@ void app_main() {
     //     I2S section
     //     initialize I2S driver
     // */
+
     i2s_chan_handle_t tx_handle;
 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, NULL));
-
+    
     i2s_std_config_t tx_std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
@@ -188,42 +188,42 @@ void app_main() {
         
     };
     
-    //ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_std_cfg));
+    
+    // Write some data to the channel output
 
-    // // Write some data to the channel output
+    uint8_t *w_buf = (uint8_t *)calloc(1, WB_SIZE);
+    assert(w_buf);
 
-    // uint8_t *w_buf = (uint8_t *)calloc(1, WB_SIZE);
-    // assert(w_buf);
+    for (int i = 0; i < WB_SIZE; i += 8) {
+        w_buf[i]     = 0x12;
+        w_buf[i + 1] = 0x34;
+        w_buf[i + 2] = 0x56;
+        w_buf[i + 3] = 0x78;
+        w_buf[i + 4] = 0x9A;
+        w_buf[i + 5] = 0xBC;
+        w_buf[i + 6] = 0xDE;
+        w_buf[i + 7] = 0xF0;
+    }
 
-    // for (int i = 0; i < WB_SIZE; i += 8) {
-    //     w_buf[i]     = 0x12;
-    //     w_buf[i + 1] = 0x34;
-    //     w_buf[i + 2] = 0x56;
-    //     w_buf[i + 3] = 0x78;
-    //     w_buf[i + 4] = 0x9A;
-    //     w_buf[i + 5] = 0xBC;
-    //     w_buf[i + 6] = 0xDE;
-    //     w_buf[i + 7] = 0xF0;
-    // }
+    size_t w_bytes = WB_SIZE;
 
-    // size_t w_bytes = WB_SIZE;
+    while (w_bytes == WB_SIZE) {
+        ESP_ERROR_CHECK(i2s_channel_preload_data(tx_handle, w_buf, WB_SIZE, &w_bytes));
+    }
 
-    // while (w_bytes == WB_SIZE) {
-    //     ESP_ERROR_CHECK(i2s_channel_preload_data(tx_handle, w_buf, WB_SIZE, &w_bytes));
-    // }
+    ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
+    while (1)
+    {
+        if (i2s_channel_write(tx_handle, w_buf, WB_SIZE, &w_bytes, 1000) == ESP_OK) {
+            ESP_LOGI(ourTaskName, "i2s write %d bytes\n", w_bytes);
+        }  else {
+            ESP_LOGI(ourTaskName, "i2s write failed\n");
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
 
-    // ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
-    // while (1)
-    // {
-    //     if (i2s_channel_write(tx_handle, w_buf, WB_SIZE, &w_bytes, 1000) == ESP_OK) {
-    //         ESP_LOGI(ourTaskName, "i2s write %d bytes\n", w_bytes);
-    //     }  else {
-    //         ESP_LOGI(ourTaskName, "i2s write failed\n");
-    //     }
-    //     vTaskDelay(pdMS_TO_TICKS(200));
-    // }
-
-    // free(w_buf);
+    free(w_buf);
 
     
 
