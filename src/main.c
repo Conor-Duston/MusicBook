@@ -13,6 +13,8 @@
 
 #include "driver/i2s_std.h"
 
+#include "tinywav.h"
+
 //SD card file system definitions
 #define PIN_NUM_MOSI 23
 #define PIN_NUM_MISO 19
@@ -135,7 +137,14 @@ void app_main() {
 
             ESP_LOGI(ourTaskName, "File Name: %s", file_info.fname);
             ESP_LOGI(ourTaskName, "\tSize: %10lu", file_info.fsize);
-            if (file < MAX_NUM_PAGES) {
+            if (file >= MAX_NUM_PAGES) {
+                continue;
+            }
+
+            // Search string for wav type. if type is present, then sub_address will not be null
+            char* sub_address = strnstr(file_info.fname, ".WAV", MAX_FILE_NAME_LENGTH);
+
+            if (file < MAX_NUM_PAGES && sub_address != NULL) {
                 strcpy(f_names[file], file_info.fname);
                 ESP_LOGI(ourTaskName, "File Name Copy: %s", f_names[file]);
                 file ++;
@@ -169,6 +178,8 @@ void app_main() {
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, NULL));
     
+    TinyWav test_wav;
+
     i2s_std_config_t tx_std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
@@ -191,7 +202,15 @@ void app_main() {
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_std_cfg));
     
     // Write some data to the channel output
+    
+    //test_file_name length is size of mount point plus maximum size of file name
+    char test_file_name[sizeof(mount_point) + 13];
+    strcpy(test_file_name, mount_point);
+    strcpy(&test_file_name[sizeof(mount_point)], f_names[0]);
+     
+    TinyWav audio_file;
 
+ 
     uint8_t *w_buf = (uint8_t *)calloc(1, WB_SIZE);
     assert(w_buf);
 
