@@ -177,8 +177,6 @@ void app_main() {
 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, NULL));
-    
-    TinyWav test_wav;
 
     i2s_std_config_t tx_std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
@@ -202,17 +200,36 @@ void app_main() {
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_std_cfg));
     
     // Write some data to the channel output
-    
+
+    // File opening section:
+    // Open file for reading 
+
     //test_file_name length is size of mount point plus maximum size of file name
     char test_file_name[sizeof(mount_point) + 13];
     strcpy(test_file_name, mount_point);
-    strcpy(&test_file_name[sizeof(mount_point)], f_names[0]);
-     
+    strncat(test_file_name, "/", 2);
+    strncat(test_file_name, f_names[0], sizeof(test_file_name) - 1);
+    
+    ESP_LOGI(ourTaskName, "File to open:  %s", test_file_name);
+
     TinyWav audio_file;
 
- 
+    int err = tinywav_open_read(&audio_file, test_file_name, TW_INTERLEAVED);
+
+    if (err != 0) {
+        ESP_LOGE(ourTaskName, "Tiny wave could not open file to read.");
+        ESP_LOGE(ourTaskName, "Error: %d", err);
+        return;
+    }
+
+    ESP_LOGI(ourTaskName, "WAV file information: ");
+    ESP_LOGI(ourTaskName, "File format (2 for signed, 4 for float) %d", audio_file.sampFmt);
+    ESP_LOGI(ourTaskName, "Number of audio channels: %d", audio_file.numChannels);
+    ESP_LOGI(ourTaskName, "Number of frames in header: %ld", audio_file.numFramesInHeader);
+
     uint8_t *w_buf = (uint8_t *)calloc(1, WB_SIZE);
     assert(w_buf);
+
 
     for (int i = 0; i < WB_SIZE; i += 8) {
         w_buf[i]     = 0x12;
