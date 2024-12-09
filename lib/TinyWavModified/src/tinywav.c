@@ -182,7 +182,7 @@ int tinywav_open_read(TinyWav *tw, const char *path, TinyWavChannelFormat chanFm
       fseek(tw->f, tw->h.Subchunk1Size, SEEK_CUR); // skip this subchunk
     }
   }
-  
+  long int data_chunk_start = ftell(tw->f);
   // fmt Subchunk
   elementCount  = fread(&tw->h.AudioFormat, sizeof(uint16_t), 1, tw->f);
   elementCount += fread(&tw->h.NumChannels, sizeof(uint16_t), 1, tw->f);
@@ -194,6 +194,8 @@ int tinywav_open_read(TinyWav *tw, const char *path, TinyWavChannelFormat chanFm
     tinywav_close_read(tw);
     return -1;
   }
+
+  fseek(tw->f, data_chunk_start + tw->h.Subchunk1Size, SEEK_SET);
   
   // skip over any other chunks before the "data" chunk (e.g. JUNK, INFO, bext, ...)
   while (fread(tw->h.Subchunk2ID, sizeof(char), 4, tw->f) == 4) {

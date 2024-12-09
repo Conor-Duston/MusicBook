@@ -214,6 +214,8 @@ void app_main() {
 
     TinyWav audio_file;
 
+    
+
     int err = tinywav_open_read(&audio_file, test_file_name, TW_INTERLEAVED);
 
     if (err != 0) {
@@ -227,20 +229,11 @@ void app_main() {
     ESP_LOGI(ourTaskName, "Number of audio channels: %d", audio_file.numChannels);
     ESP_LOGI(ourTaskName, "Number of frames in header: %ld", audio_file.numFramesInHeader);
 
+    long int file_loc = ftell(audio_file.f);
+    ESP_LOGI(ourTaskName, "Test file read %lx bytes in header", file_loc);
+
     uint8_t *w_buf = (uint8_t *)calloc(1, WB_SIZE);
     assert(w_buf);
-
-
-    for (int i = 0; i < WB_SIZE; i += 8) {
-        w_buf[i]     = 0x12;
-        w_buf[i + 1] = 0x34;
-        w_buf[i + 2] = 0x56;
-        w_buf[i + 3] = 0x78;
-        w_buf[i + 4] = 0x9A;
-        w_buf[i + 5] = 0xBC;
-        w_buf[i + 6] = 0xDE;
-        w_buf[i + 7] = 0xF0;
-    }
 
     size_t w_bytes = WB_SIZE;
 
@@ -249,15 +242,51 @@ void app_main() {
     }
 
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
-    while (1)
+    size_t size_wav_data_bytes = 0;
+    switch (audio_file.sampFmt)
     {
-        if (i2s_channel_write(tx_handle, w_buf, WB_SIZE, &w_bytes, 1000) == ESP_OK) {
-            ESP_LOGI(ourTaskName, "i2s write %d bytes\n", w_bytes);
-        }  else {
-            ESP_LOGI(ourTaskName, "i2s write failed\n");
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
+    case TW_INT16:
+        size_wav_data_bytes = sizeof(uint16_t);
+        break;
+    case TW_FLOAT32:
+        size_wav_data_bytes = sizeof(float);
+        break;
     }
+
+    if (size_wav_data_bytes == 0) {
+        ESP_LOGE(ourTaskName, "Unsupported audio file type");
+        return;
+    }
+
+    uint16_t frames_in_buff = WB_SIZE / (size_wav_data_bytes * audio_file.numChannels);
+
+    ESP_LOGI(ourTaskName, "Setup for file reading passed");
+    ESP_LOGI(ourTaskName, "Frames in buffer: %d", frames_in_buff);
+
+    //size_t test = fread(w_buf, sizeof(uint8_t), frames_in_buff, audio_file.f);
+    
+
+
+    // while (1)
+    // {
+    //     int frames = tinywav_read_f(&audio_file, w_buf, frames_in_buff);
+
+    //     ESP_LOGI(ourTaskName, "Frames read: %d", frames);
+
+    //     if (frames < 0) {
+    //         ESP_LOGE(ourTaskName, "Error in reading WAV file");
+    //     } if (frames == 0) {
+    //         tinywav_close_read(&audio_file);
+    //         break;
+    //     }
+
+    //     if (i2s_channel_write(tx_handle, w_buf, frames * frames_in_buff, &w_bytes, 1000) == ESP_OK) {
+    //         ESP_LOGI(ourTaskName, "i2s write %d bytes\n", w_bytes);
+    //     }  else {
+    //         ESP_LOGI(ourTaskName, "i2s write failed\n");
+    //      }
+    //     vTaskDelay(pdMS_TO_TICKS(200));
+    // }
 
     free(w_buf);
 
