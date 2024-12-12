@@ -2,6 +2,11 @@
     "files.associations": {
         "sdspi_host.h": "c",
         "esp_log.h": "c",
-        "i2s_std.h": "c"
+        "i2s_std.h": "c",
+        "functional": "c",
+        "freertos.h": "c",
+        "stdio.h": "c",
+        "esp_vfs.h": "c",
+        "esp_vfs_fat.h": "c"
     }
 }
