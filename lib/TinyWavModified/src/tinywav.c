@@ -17,6 +17,7 @@
 #include "tinywav.h"
 #include <string.h> // for memcpy
 #include <unistd.h>
+#include "esp_attr.h"
 
 // MARK: Processor Helpers
 #if !defined(TINYWAV_USE_ALLOCA) && !defined(TINYWAV_USE_VLA) &&               \
@@ -240,88 +241,35 @@ int tinywav_open_read(TinyWav *tw, const char *path,
   return 0;
 }
 
-int tinywav_read_f(TinyWav *tw, void *data, void *buffer, int buffer_len) {
+int IRAM_ATTR tinywav_read_f(TinyWav *tw, void *data, void *buffer, int buffer_len) {
   
   if (tw == NULL || data == NULL || buffer == NULL || buffer_len < 0 || !tinywav_isOpen(tw)) {
     return -1;
   }
-  int file_number = fileno(tw->f);
-
+  
   if (tw->totalFramesReadWritten * tw->h.BlockAlign >= tw->h.Subchunk2Size) {
     // We are past the 'data' subchunk (size as declared in header).
     // Sometimes there are additional chunks *after* -- ignore these.
     return 0; // there's nothing more to read, not an error.
   }
-  
+
+  int file_number = fileno(tw->f);
+
   switch (tw->sampFmt) {
   case TW_INT16: {
-    uint16_t* buff_16 = (uint16_t * )buffer;
-    size_t samples_read = read(file_number, buffer, buffer_len);
-    int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint16_t));
-    tw->totalFramesReadWritten += frames_read;
-    switch (tw->chanFmt) {
-    case TW_INTERLEAVED: { // channel buffer is interleaved e.g. [LRLRLRLR]
-      for (int pos = 0; pos < tw->numChannels * frames_read; pos++) {
-            ((float *) data)[pos] = (float) buff_16[pos] / INT16_MAX;
-          }
-      return frames_read;
-    }
-    case TW_INLINE: { // channel buffer is inlined e.g. [LLLLRRRR]
-      for (int i = 0, pos = 0; i < tw->numChannels; i++) {
-        for (int j = i; j < frames_read * tw->numChannels;
-             j += tw->numChannels, ++pos) {
-          ((float *)data)[pos] = ((float *)buffer)[j] / INT16_MAX;
-        }
+      size_t samples_read = read(file_number, data, buffer_len);
+      int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint16_t));
+      for (int i = 0; i < samples_read / sizeof(uint16_t); i++) {
+        ((int16_t*)data)[i] = ((int16_t *)data)[i] * 4;
       }
+      tw->totalFramesReadWritten += frames_read;
       return frames_read;
-    }
-    case TW_SPLIT: { // channel buffer is split e.g. [[LLLL],[RRRR]]
-      for (int i = 0, pos = 0; i < tw->numChannels; i++) {
-        for (int j = 0; j < frames_read; j++, ++pos) {
-          ((float **)data)[i][j] =
-              ((float *)buffer)[j * tw->numChannels + i] / INT16_MAX;
-        }
-      }
-      return frames_read;
-    }
-    default:
-      return 0;
-    }
   }
   case TW_FLOAT32: {
-    switch (tw->chanFmt) {
-    case TW_INTERLEAVED: { // channel buffer is interleaved e.g. [LRLRLRLR]
-      size_t samples_read = read(file_number, data, buffer_len);
-      int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint32_t));
-      tw->totalFramesReadWritten += frames_read;
-      return frames_read;
-    }
-    case TW_INLINE: { // channel buffer is inlined e.g. [LLLLRRRR]
-      size_t samples_read = read(file_number, buffer, buffer_len);
-      int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint32_t));
-      tw->totalFramesReadWritten += frames_read;
-      for (int i = 0, pos = 0; i < tw->numChannels; i++) {
-        for (int j = i; j < frames_read * tw->numChannels;
-             j += tw->numChannels, ++pos) {
-          ((float *)data)[pos] = ((float *)buffer)[j];
-        }
-      }
-      return frames_read;
-    }
-    case TW_SPLIT: { // channel buffer is split e.g. [[LLLL],[RRRR]]
-      size_t samples_read = read(file_number, buffer, buffer_len);
-      int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint32_t));
-      tw->totalFramesReadWritten += frames_read;
-      for (int i = 0, pos = 0; i < tw->numChannels; i++) {
-        for (int j = 0; j < frames_read; j++, ++pos) {
-          ((float **)data)[i][j] = ((float *)data)[j * tw->numChannels + i];
-        }
-      }
-      return frames_read;
-    }
-    default:
-      return 0;
-    }
+    size_t samples_read = read(file_number, data, buffer_len);
+    int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint32_t));
+    tw->totalFramesReadWritten += frames_read;
+    return frames_read;
   }
   default:
     return 0;
