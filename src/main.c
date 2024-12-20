@@ -72,11 +72,6 @@ volatile uint8_t selection = 0;
 volatile IRAM_DATA_ATTR bool selection_changed = false;
 
 static void set_file_read_from(void* arg) { 
-  int level = gpio_get_level(0);
-  level += gpio_get_level(1);
-  level += gpio_get_level(2);
-
-  selection = level;
   selection_changed = true;
 }
 
@@ -212,15 +207,15 @@ void app_main(void)
 
   BaseType_t result =
       xTaskCreatePinnedToCore(read_file_to_shared_buffer, "read_file", 8192,
-                              NULL, 10, &audiotasks.read_task, 0);
+                              NULL, 10, &audiotasks.read_task, 1);
   if (result != pdPASS)
   {
     ESP_LOGE(ourTaskName, "Failed to create write task");
     return;
   }
 
-  result = xTaskCreatePinnedToCore(write_shared_audio_buffer, "play_audio",
-                                   8192, NULL, 10, &audiotasks.write_task, 1);
+  result = xTaskCreate(write_shared_audio_buffer, "play_audio",
+                                   8192, NULL, 10, &audiotasks.write_task);
 
   if (result != pdPASS)
   {
@@ -228,20 +223,7 @@ void app_main(void)
     return;
   }
 
-  while (1)
-  {
-    vTaskDelay(10000);
-    if (audiotasks.read_task == NULL)
-    {
-      ESP_LOGE(ourTaskName, "Error in read task");
-      return;
-    }
-    else if (audiotasks.write_task == NULL)
-    {
-      ESP_LOGE(ourTaskName, "Error in write task");
-      return;
-    }
-  }
+  vTaskDelete(NULL);
 }
 
 void IRAM_ATTR read_file_to_shared_buffer()
@@ -441,6 +423,7 @@ void IRAM_ATTR read_file_to_shared_buffer()
     BaseType_t res = xRingbufferSend(audio_handle, w_buf, BUFF_READ_SIZE, 5);
     if (res != pdTRUE) {
       vTaskDelay(0);
+      //ESP_LOGI(ourTaskName, "No space / timeout");
       continue;
     }
 
@@ -454,11 +437,13 @@ void IRAM_ATTR read_file_to_shared_buffer()
     if (frames == 0)
     {
       fseek(audio_file.f, data_start, SEEK_SET);
+      audio_file.totalFramesReadWritten = 0;
       //ESP_LOGI(ourTaskName, "Finished playing track");
       break;
     }
 
     if (selection_changed) {
+      ESP_LOGI(ourTaskName, "selection has changed");
       selection_changed = false;
       if (selection > NUM_SECTIONS) {
         while (1)
@@ -471,9 +456,10 @@ void IRAM_ATTR read_file_to_shared_buffer()
           }
           playing = false;
           xSemaphoreGive(audio_info_mutex);
+          continue;
         }
-        continue;
       }
+      
       ESP_LOGI(ourTaskName, "Doing selection change");
       strcpy(&file_name[5], f_names[selection]);
       ESP_LOGI(ourTaskName, "File to Open(%s)", file_name);
@@ -504,16 +490,31 @@ void IRAM_ATTR read_file_to_shared_buffer()
   }
 }
 
-void IRAM_ATTR write_shared_audio_buffer()
-{
+static IRAM_ATTR bool data_on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx) {
+  size_t recieved_data_size;
+  uint8_t* data = xRingbufferReceiveUpToFromISR(audio_handle, &recieved_data_size, event->size);
+  if (data == NULL) {
+    return false;
+  }
+  memcpy(event->dma_buf, data, recieved_data_size);
+  BaseType_t woke_higher_task;
+  vRingbufferReturnItemFromISR(audio_handle, data, &woke_higher_task);
+  return woke_higher_task;
+}
 
-  char *ourTaskName = pcTaskGetName(NULL);
-
-  i2s_chan_handle_t tx_handle;
-
-  i2s_chan_config_t chan_cfg =
-      I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-  ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, NULL));
+static void setup_i2s_channel(i2s_chan_handle_t *tx_handle) {
+  
+  i2s_chan_config_t chan_cfg = {
+    .id = I2S_NUM_AUTO,
+    .role = I2S_ROLE_MASTER,
+    .dma_desc_num = 6, 
+    .dma_frame_num = 240,
+    .auto_clear_after_cb = false,
+    .auto_clear_before_cb = false,
+    .intr_priority = 0,
+  };
+  //I2S_CHANNEL_DEFAULT_CONFIG
+  ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, tx_handle, NULL));
 
   BaseType_t res;
 
@@ -528,12 +529,12 @@ void IRAM_ATTR write_shared_audio_buffer()
     {
       xSemaphoreGive(audio_info_mutex);
     }
-    ESP_LOGI(ourTaskName,
+    ESP_LOGI("i2s_channel_setup",
              "did not get audio mutex for reading or result was unchanged;");
     vTaskDelay(pdMS_TO_TICKS(250));
   }
 
-  ESP_LOGE(ourTaskName, "Configuring output");
+  ESP_LOGI("i2s_channel_setup", "Configuring output");
   uint32_t local_freq = sample_frequency;
   i2s_data_bit_width_t local_bit_width = (i2s_data_bit_width_t)bits_sample;
   i2s_slot_mode_t local_slot_mode = (i2s_slot_mode_t)num_channels;
@@ -568,61 +569,95 @@ void IRAM_ATTR write_shared_audio_buffer()
 
   };
 
-  ESP_LOGE(ourTaskName, "Initializing channel");
-  ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_std_cfg));
+  ESP_LOGI("i2s_channel_setup", "Initializing channel");
+  ESP_ERROR_CHECK(i2s_channel_init_std_mode(*tx_handle, &tx_std_cfg));
 
-  ESP_LOGE(ourTaskName, "Creating buffer");
+  i2s_event_callbacks_t cbs = {
+    .on_recv = NULL,
+    .on_recv_q_ovf = NULL,
+    .on_sent = data_on_sent,
+    .on_send_q_ovf = NULL,
+  };
 
-  ESP_LOGE(ourTaskName, "Pre-Loading mem to CPU");
+  ESP_ERROR_CHECK(i2s_channel_register_event_callback(*tx_handle, &cbs, NULL));
+}
+
+void IRAM_ATTR write_shared_audio_buffer()
+{
+  char *ourTaskName = pcTaskGetName(NULL);
+
+  i2s_chan_handle_t tx_handle;
+
+  setup_i2s_channel(&tx_handle);
+
+  ESP_LOGI(ourTaskName, "Pre-Loading mem to CPU");
 
   size_t total_received;
-  size_t recieved_data;
+  //size_t recieved_data;
   size_t data_read = 0;
 
   uint8_t* data = NULL;
     
-  ESP_LOGE(ourTaskName, "Enabling Channel");
+  data = xRingbufferReceiveUpTo(audio_handle, &total_received, 0, BUFF_READ_SIZE); 
+
+  ESP_ERROR_CHECK(i2s_channel_preload_data(tx_handle, data, total_received, &data_read));
+  vTaskDelay(0);
+  if (data_read != total_received) {
+    return;
+  }
+
+  vRingbufferReturnItem(audio_handle, data);
+
+  ESP_LOGI(ourTaskName, "Enabling Channel");
   ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
+  ESP_LOGI(ourTaskName, "Channel Enabled");
   while (1)
   {
     if (info_changed) {
-      ESP_LOGI(ourTaskName, "Detected change in file name, flushing buffers");
-      while (1) {
-        data = xRingbufferReceiveUpTo(audio_handle, &total_received, 0, BUFF_READ_SIZE); 
-        //fwrite(data, sizeof(uint8_t), total_received, stdout);
-
-        while (data_read != total_received) {
-          esp_err_t ret = i2s_channel_write(tx_handle, &data[data_read], total_received - data_read, &recieved_data, 10);
-          data_read += recieved_data;
-          if (ret == ESP_ERR_TIMEOUT) {
-            continue;
-          } else if (ret != ESP_OK) {
-            vRingbufferReturnItem(audio_handle, data);
-            ESP_LOGE(ourTaskName, "Error in I2S interface");
-            return;
-          }
-        }
-        if (data == NULL) {
-          ESP_LOGI(ourTaskName, "Buffer flushed");
-          break;
-        }
-        
-      }
-
       esp_err_t ret = i2s_channel_disable(tx_handle);
       if (ret != ESP_OK) {
         ESP_LOGE(ourTaskName, "Error disabling channel (%s)", esp_err_to_name(ret));
         return;
       }
+
+      ESP_LOGI(ourTaskName, "Detected change in file name, flushing buffers");
+      while (1) {
+        data = xRingbufferReceiveUpTo(audio_handle, &total_received, 0, BUFF_READ_SIZE); 
+        //fwrite(data, sizeof(uint8_t), total_received, stdout);
+        if (data == NULL) {
+          ESP_LOGI(ourTaskName, "Buffer flushed");
+          break;
+        }
+        vRingbufferReturnItem(audio_handle, data);
+      }
+
       vTaskDelay(10);
-      xSemaphoreTake(audio_info_mutex, 100);
-      local_freq = sample_frequency;
-      local_bit_width = (i2s_data_bit_width_t)bits_sample;
-      local_slot_mode = (i2s_slot_mode_t)num_channels;
+      
+      while (1)
+      {
+        BaseType_t res = xSemaphoreTake(audio_info_mutex, pdMS_TO_TICKS(10));
+        if (res != pdTRUE) {
+          vTaskDelay(pdMS_TO_TICKS(20));
+          continue;
+        }
+        if (!info_changed){
+          xSemaphoreGive(audio_info_mutex);
+          vTaskDelay(pdMS_TO_TICKS(20));
+          continue;
+        }
+      }
+
+      uint32_t local_freq = sample_frequency;
+      i2s_data_bit_width_t local_bit_width = (i2s_data_bit_width_t)bits_sample;
+      i2s_slot_mode_t local_slot_mode = (i2s_slot_mode_t)num_channels;
       info_changed = false;
       xSemaphoreGive(audio_info_mutex);
 
-      clock_config.sample_rate_hz = local_freq;
+      i2s_std_clk_config_t clock_config = {
+        .clk_src = SOC_MOD_CLK_APLL,
+        .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+        .sample_rate_hz = local_freq
+      };
 
       i2s_channel_reconfig_std_clock(tx_handle, &clock_config);
       if (ret != ESP_OK) {
@@ -632,30 +667,46 @@ void IRAM_ATTR write_shared_audio_buffer()
 
       i2s_std_slot_config_t slot_cnfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(local_bit_width, local_slot_mode);
       i2s_channel_reconfig_std_slot(tx_handle, &slot_cnfg);
+      
+      data = xRingbufferReceiveUpTo(audio_handle, &total_received, 0, BUFF_READ_SIZE); 
+
+      ESP_ERROR_CHECK(i2s_channel_preload_data(tx_handle, data, total_received, &data_read));
+      vTaskDelay(0);
+      if (data_read != total_received) {
+        return;
+      }
+
+      vRingbufferReturnItem(audio_handle, data);
+      
       i2s_channel_enable(tx_handle);
     }
 
-    data = xRingbufferReceiveUpTo(audio_handle, &total_received, 0, BUFF_READ_SIZE); 
+    vTaskDelay(2000);
+
+    //data = xRingbufferReceiveUpTo(audio_handle, &total_received, 0, BUFF_READ_SIZE); 
     //fwrite(data, sizeof(uint8_t), total_received, stdout);
-    if (data == NULL)
-    {
-      //ESP_LOGE(ourTaskName, "Failed to receive Item");
-      vTaskDelay(0);
-      continue;
-    }
-    data_read = 0;
-    //ESP_LOGE(ourTaskName, "Writing info to i2S buffer");
-    while (data_read != total_received) {
-      esp_err_t ret = i2s_channel_write(tx_handle, &data[data_read], total_received - data_read, &recieved_data, 10);
-      data_read += recieved_data;
-      if (ret == ESP_ERR_TIMEOUT) {
-        continue;
-      } else if (ret != ESP_OK) {
-        vRingbufferReturnItem(audio_handle, data);
-        ESP_LOGE(ourTaskName, "Error in I2S interface");
-        return;
-      }
-    }
-    vRingbufferReturnItem(audio_handle, data);
+    // if (data == NULL)
+    // {
+    //   ESP_LOGI(ourTaskName, "Failed to receive Item");
+    //   vTaskDelay(10);
+    //   continue;
+    // }
+    // //data_read = 0;
+    // //ESP_LOGE(ourTaskName, "Writing info to i2S buffer");
+    
+    // while (data_read != total_received) {
+    //   //ESP_LOGI(ourTaskName, "Writing to I2S");
+    //   esp_err_t ret = i2s_channel_write(tx_handle, &data[data_read], total_received - data_read, &recieved_data, 10);
+    //   //vTaskDelay(0);
+    //   data_read += recieved_data;
+    //   if (ret == ESP_ERR_TIMEOUT) {
+    //     continue;
+    //   } else if (ret != ESP_OK) {
+    //     vRingbufferReturnItem(audio_handle, data);
+    //     ESP_LOGE(ourTaskName, "Error in I2S interface");
+    //     return;
+    //   }
+    // }
+    // vRingbufferReturnItem(audio_handle, data);
   }
 }
