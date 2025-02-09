@@ -33,9 +33,9 @@
 #define I2S_WS 27
 
 #define MIN_DATA_SIZE 96   
-#define DATA_MULTIPLIER 32
+#define DATA_MULTIPLIER 64
 #define BUFF_SIZE MIN_DATA_SIZE * DATA_MULTIPLIER
-#define BUFF_READ_SIZE BUFF_SIZE / 2
+#define BUFF_READ_SIZE MIN_DATA_SIZE / 2
 
 TaskHandle_t read_task;
 
@@ -256,7 +256,7 @@ void read_file_to_shared_buffer()
   }
 }
 
-static IRAM_ATTR bool data_on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx) {
+static IRAM_ATTR bool on_data_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx) {
   size_t recieved_data_size;
   uint8_t* data = xRingbufferReceiveUpToFromISR(audio_handle, &recieved_data_size, event->size);
   if (data == NULL) {
@@ -318,7 +318,7 @@ static void setup_i2s_channel(i2s_chan_handle_t *tx_handle, uint32_t sample_freq
   i2s_event_callbacks_t cbs = {
     .on_recv = NULL,
     .on_recv_q_ovf = NULL,
-    .on_sent = data_on_sent,
+    .on_sent = on_data_sent,
     .on_send_q_ovf = NULL,
   };
 
