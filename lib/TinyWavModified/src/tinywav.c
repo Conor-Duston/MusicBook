@@ -259,9 +259,6 @@ int IRAM_ATTR tinywav_read_f(TinyWav *tw, void *data, void *buffer, int buffer_l
   case TW_INT16: {
       size_t samples_read = read(file_number, data, buffer_len);
       int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint16_t));
-      for (int i = 0; i < samples_read / sizeof(uint16_t); i++) {
-        ((int16_t*)data)[i] = ((int16_t *)data)[i];
-      }
       tw->totalFramesReadWritten += frames_read;
       return frames_read;
   }
