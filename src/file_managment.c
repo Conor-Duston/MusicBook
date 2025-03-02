@@ -30,7 +30,7 @@ bool mount_fs(sdmmc_card_t *card) {
 
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
   // Speed set at about .7 max speed that did not through a 109 improper error.
-  host.max_freq_khz = 9000;
+  host.max_freq_khz = 5000;
   
   spi_bus_config_t bus_cfg =  {.mosi_io_num = PIN_NUM_MOSI,
                               .miso_io_num = PIN_NUM_MISO,

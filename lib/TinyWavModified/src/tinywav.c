@@ -237,13 +237,14 @@ int tinywav_open_read(TinyWav *tw, const char *path,
 
   tw->numFramesInHeader = tw->h.Subchunk2Size / (tw->numChannels * tw->sampFmt);
   tw->totalFramesReadWritten = 0;
+  tw->fileno = fileno(tw->f);
 
   return 0;
 }
 
-int IRAM_ATTR tinywav_read_f(TinyWav *tw, void *data, void *buffer, int buffer_len) {
+int IRAM_ATTR tinywav_read_f(TinyWav *tw, void *buffer, int buffer_len) {
   
-  if (tw == NULL || data == NULL || buffer == NULL || buffer_len < 0 || !tinywav_isOpen(tw)) {
+  if (tw == NULL || buffer == NULL || buffer_len < 0 || !tinywav_isOpen(tw)) {
     return -1;
   }
   
@@ -253,18 +254,16 @@ int IRAM_ATTR tinywav_read_f(TinyWav *tw, void *data, void *buffer, int buffer_l
     return 0; // there's nothing more to read, not an error.
   }
 
-  int file_number = fileno(tw->f);
-
   switch (tw->sampFmt) {
   case TW_INT16: {
-      size_t samples_read = read(file_number, data, buffer_len);
-      int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint16_t));
+      size_t bytes_read = read(tw->fileno, buffer, buffer_len);
+      int frames_read = (int) bytes_read / (tw->numChannels * sizeof(uint16_t));
       tw->totalFramesReadWritten += frames_read;
       return frames_read;
   }
   case TW_FLOAT32: {
-    size_t samples_read = read(file_number, data, buffer_len);
-    int frames_read = (int)samples_read / (tw->numChannels * sizeof(uint32_t));
+    size_t bytes_read = read(tw->fileno, buffer, buffer_len);
+    int frames_read = (int)bytes_read / (tw->numChannels * sizeof(uint32_t));
     tw->totalFramesReadWritten += frames_read;
     return frames_read;
   }

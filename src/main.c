@@ -35,7 +35,7 @@
 #define MIN_DATA_SIZE 96   
 #define DATA_MULTIPLIER 64
 #define BUFF_SIZE MIN_DATA_SIZE * DATA_MULTIPLIER
-#define BUFF_READ_SIZE MIN_DATA_SIZE / 2
+#define BUFF_READ_SIZE MIN_DATA_SIZE * DATA_MULTIPLIER / 16
 
 TaskHandle_t read_task;
 
@@ -135,16 +135,13 @@ void read_file_to_shared_buffer()
   uint8_t *w_buf = (uint8_t *)calloc(1, BUFF_READ_SIZE);
   assert(w_buf);
 
-  uint8_t *r_buff = (uint8_t *)calloc(1, BUFF_READ_SIZE);
-  assert (r_buff);
-
   uint16_t bytes_in_frame = size_wav_data_bytes * audio_file.numChannels;
   uint16_t frames_in_buff = BUFF_READ_SIZE / bytes_in_frame;
 
   ESP_LOGI(ourTaskName, "Setup for file reading passed");
   ESP_LOGI(ourTaskName, "Frames in buffer: %d", frames_in_buff);
 
-  int frames = tinywav_read_f(&audio_file, w_buf, r_buff, BUFF_READ_SIZE);
+  int frames = tinywav_read_f(&audio_file, w_buf, BUFF_READ_SIZE);
 
   //ESP_LOGI(ourTaskName, "Frames read: %d", frames);
 
@@ -172,23 +169,29 @@ void read_file_to_shared_buffer()
 
   while (1)
   { 
+    if (!playing) {
+      
+    }
+
     res = xRingbufferSend(audio_handle, w_buf, BUFF_READ_SIZE, 5);
     if (res != pdTRUE) {
       vTaskDelay(0);
       continue;
     }
 
-    frames = tinywav_read_f(&audio_file, w_buf, r_buff, BUFF_READ_SIZE);
+    frames = tinywav_read_f(&audio_file, w_buf, BUFF_READ_SIZE);
+    
     if (frames < 0)
     {
       ESP_LOGE(ourTaskName, "Error in reading WAV file");
       return;
     }
-    if (frames == 0)
+
+    if (frames == 0 || frames * bytes_in_frame < BUFF_READ_SIZE)
     {
-      fseek(audio_file.f, data_start, SEEK_SET);
+      lseek(audio_file.fileno, data_start, SEEK_SET);
       audio_file.totalFramesReadWritten = 0;
-      break;
+      continue;
     }
 
     if (selection_changed && playing) {
@@ -202,13 +205,13 @@ void read_file_to_shared_buffer()
 
       if (selection > NUM_SECTIONS) {
         playing = false;
-        break;
+        continue;
       }
 
       tinywav_close_read(&audio_file);
       open_file(selection, &audio_file);
 
-      frames = tinywav_read_f(&audio_file, w_buf, r_buff, BUFF_READ_SIZE);
+      frames = tinywav_read_f(&audio_file, w_buf, BUFF_READ_SIZE);
       if (frames < 0)
       {
         ESP_LOGE(ourTaskName, "Error in reading WAV file");
@@ -235,7 +238,7 @@ void read_file_to_shared_buffer()
 
       open_file(selection, &audio_file);
 
-      frames = tinywav_read_f(&audio_file, w_buf, r_buff, BUFF_READ_SIZE);
+      frames = tinywav_read_f(&audio_file, w_buf, BUFF_READ_SIZE);
       if (frames < 0)
       {
         ESP_LOGE(ourTaskName, "Error in reading WAV file");
@@ -249,7 +252,6 @@ void read_file_to_shared_buffer()
       }
 
       reconfigure_audio_output(audio_handle, audio_file.h.SampleRate, audio_file.h.BitsPerSample, audio_file.h.AudioFormat);
-
     }
     //ESP_LOGI(ourTaskName, "Frames read: %d", frames);
     vTaskDelay(0);
@@ -257,13 +259,16 @@ void read_file_to_shared_buffer()
 }
 
 static IRAM_ATTR bool on_data_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx) {
-  size_t recieved_data_size;
-  uint8_t* data = xRingbufferReceiveUpToFromISR(audio_handle, &recieved_data_size, event->size);
+  size_t received_data_size;
+  uint8_t* data = xRingbufferReceiveUpToFromISR(audio_handle, &received_data_size, event->size);
+  
   if (data == NULL) {
     return false;
   }
-  memcpy(event->dma_buf, data, recieved_data_size);
+  
+  memcpy(event->dma_buf, data, received_data_size);
   BaseType_t woke_higher_task;
+  
   vRingbufferReturnItemFromISR(audio_handle, data, &woke_higher_task);
   return woke_higher_task;
 }
@@ -427,7 +432,7 @@ bool gpio_setup() {
   io_conf.mode = GPIO_MODE_INPUT;
   io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
   io_conf.intr_type = GPIO_INTR_ANYEDGE;
-  io_conf.pin_bit_mask = SECTION_PIN_SELECT;
+  io_conf.pin_bit_mask = ((1ULL<<2) | (1ULL<<0) | (1ULL<<4));
 
   esp_err_t err = gpio_config(&io_conf);
 
