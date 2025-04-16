@@ -176,9 +176,9 @@ int open_file(const int index, TinyWav* tiny_wav_output) {
 
   // file_name length is size of mount point plus maximum size of file name
   char file_name[sizeof(MOUNT_POINT) + MAX_FILE_NAME_LENGTH];
-  strcpy(file_name, MOUNT_POINT);
-  strncat(file_name, "/", 2);
-  strncat(file_name, files[0], sizeof(file_name) - 1);
+  strncpy(file_name, MOUNT_POINT, sizeof(MOUNT_POINT));
+  strncpy(&file_name[sizeof(MOUNT_POINT) - 1], "/", 2);
+  strncpy(&file_name[sizeof(MOUNT_POINT) - 1 + 1], files[index], sizeof(files[index]));
 
   ESP_LOGI(ourTaskName, "File to open:  %s", file_name);
 

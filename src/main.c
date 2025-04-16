@@ -169,29 +169,27 @@ void read_file_to_shared_buffer()
 
   while (1)
   { 
-    if (!playing) {
+    if (playing) {
+      res = xRingbufferSend(audio_handle, w_buf, MIN(frames * bytes_in_frame, BUFF_READ_SIZE), 5);
+      if (res != pdTRUE) {
+        vTaskDelay(0);
+        continue;
+      }
+
+      frames = tinywav_read_f(&audio_file, w_buf, BUFF_READ_SIZE);
       
-    }
+      if (frames < 0)
+      {
+        ESP_LOGE(ourTaskName, "Error in reading WAV file");
+        return;
+      }
 
-    res = xRingbufferSend(audio_handle, w_buf, BUFF_READ_SIZE, 5);
-    if (res != pdTRUE) {
-      vTaskDelay(0);
-      continue;
-    }
-
-    frames = tinywav_read_f(&audio_file, w_buf, BUFF_READ_SIZE);
-    
-    if (frames < 0)
-    {
-      ESP_LOGE(ourTaskName, "Error in reading WAV file");
-      return;
-    }
-
-    if (frames == 0 || frames * bytes_in_frame < BUFF_READ_SIZE)
-    {
-      lseek(audio_file.fileno, data_start, SEEK_SET);
-      audio_file.totalFramesReadWritten = 0;
-      continue;
+      if (frames == 0 || frames * bytes_in_frame < BUFF_READ_SIZE)
+      {
+        lseek(audio_file.fileno, data_start, SEEK_SET);
+        audio_file.totalFramesReadWritten = 0;
+        continue;
+      }
     }
 
     if (selection_changed && playing) {

@@ -278,6 +278,8 @@ void tinywav_close_read(TinyWav *tw) {
   }
 
   fclose(tw->f);
+  close(tw->fileno);
+  
   tw->f = NULL;
 }
 
